@@ -76,7 +76,7 @@ int verbose = 0;
 int yprt[4] = {0, 0, 0, 0};
 
 long dt_ms = 0;
-static struct timespec ts, t1, t2, *dt, lastPacketTime;
+static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 
 
 #define MSG_SIZE 3
@@ -117,21 +117,18 @@ int sendMsg(int t, int v) {
     return 0;
 }
 
-char** str_split(char* a_str, const char a_delim)
-{
-    char** result    = 0;
-    size_t count     = 0;
-    char* tmp        = a_str;
+char** str_split(char* a_str, const char a_delim) {
+    char** result = 0;
+    size_t count = 0;
+    char* tmp = a_str;
     char* last_comma = 0;
     char delim[2];
     delim[0] = a_delim;
     delim[1] = 0;
 
     /* Count how many elements will be extracted. */
-    while (*tmp)
-    {
-        if (a_delim == *tmp)
-        {
+    while (*tmp) {
+        if (a_delim == *tmp) {
             count++;
             last_comma = tmp;
         }
@@ -145,15 +142,13 @@ char** str_split(char* a_str, const char a_delim)
        knows where the list of returned strings ends. */
     count++;
 
-    result = (char**) malloc(sizeof(char*) * count);
+    result = (char**) malloc(sizeof (char*) * count);
 
-    if (result)
-    {
-        size_t idx  = 0;
+    if (result) {
+        size_t idx = 0;
         char* token = strtok(a_str, delim);
 
-        while (token)
-        {
+        while (token) {
             assert(idx < count);
             *(result + idx++) = strdup(token);
             token = strtok(0, delim);
@@ -166,8 +161,6 @@ char** str_split(char* a_str, const char a_delim)
 }
 
 const char * handle_packet(char * data) {
-
-    static char str[128];
 
     char** tokens = str_split(data, ' ');
 
@@ -184,13 +177,13 @@ const char * handle_packet(char * data) {
         yprt[2] = atoi(tokens[4]);
         yprt[3] = atoi(tokens[1]);
 
-        dt = TimeSpecDiff(&lastPacketTime, &t1);
+        dt = TimeSpecDiff(&lastPacketTime, &t3);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
         if (dt_ms < 50) {
             //mssleep(50 - dt_ms);
             return "FLOOD"; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
         }
-        t1 = lastPacketTime;
+        t3 = lastPacketTime;
 
         queueMsg(COMMAND_SET_YAW, yprt[0]);
         queueMsg(COMMAND_SET_PITCH, yprt[1]);
@@ -209,11 +202,12 @@ const char * handle_packet(char * data) {
 
     } else if (strcmp(tokens[0], "altitudeholderenabled") == 0) {
         sendMsg(COMMAND_SET_ALTITUDE_HOLD, atoi(tokens[1])); // 0 or 1
+
     } else if (strcmp(tokens[0], "altitudeholdermod") == 0) {
         sendMsg(COMMAND_INCREMENT_ALTITUDE_TARGET, atoi(tokens[1]));
-    } else if (strcmp(tokens[0], "altitudeholder")) {
+    } else if (strcmp(tokens[0], "altitudeholder") == 0) {
         sendMsg(COMMAND_SET_ALTITUDE, atoi(tokens[1]));
-    } else if (strcmp(tokens[0], "tm")) {
+    } else if (strcmp(tokens[0], "tm") == 0) {
         sendMsg(COMMAND_TESTMOTOR_FL, atoi(tokens[1]));
         sendMsg(COMMAND_TESTMOTOR_BL, atoi(tokens[2]));
         sendMsg(COMMAND_TESTMOTOR_FR, atoi(tokens[3]));
@@ -221,14 +215,22 @@ const char * handle_packet(char * data) {
         sendQueue();
 
     } else if (strcmp(tokens[0], "takepicture") == 0) {
+        char str[128];
         //take picture
         memset(str, '\0', 128);
         sprintf(str, "/usr/local/bin/picsnap.sh %05d ", config.cam_seq++);
         ret = system(str);
     } else if (strcmp(tokens[0], "vidsnap") == 0) {
+        char str[128];
         memset(str, '\0', 128);
         sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
         ret = system(str);
+    } else if (strcmp(tokens[0], "querystatus") == 0) {
+        char * resp = (char*) malloc(sizeof (char) * 255);
+        memset(resp, '\0', 255);
+        // yaw pitch roll altitudetarget altitude
+        snprintf(resp, 255, "status %2.2f %2.2f %2.2f %i %i", avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE]);
+        return resp;
     }
 
     /*        case 0:
@@ -528,8 +530,8 @@ void init() {
 }
 
 void loop() {
-    clock_gettime(CLOCK_REALTIME, &t2);
-    lastPacketTime = ts = t1 = t2;
+    clock_gettime(CLOCK_REALTIME, &t3);
+    lastPacketTime = ts = t1 = t2 = t3;
     if (verbose) printf("Starting main loop...\n");
 
     while (!err && !stop) {
@@ -540,17 +542,18 @@ void loop() {
             sendMsg(COMMAND_SET_ALTITUDE_HOLD, alt_hold);
         }
 
-        /*
+
         clock_gettime(CLOCK_REALTIME, &t2);
         dt = TimeSpecDiff(&t2, &t1);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
 
+        /*
         if (dt_ms < 50) {
             mssleep(50 - dt_ms);
             continue; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
         }
-        t1 = t2;
         */
+        t1 = t2;
 
         if (alt_hold || yprt[3] > config.rec_t[2])
             flight_time += dt_ms;
@@ -561,7 +564,7 @@ void loop() {
         if (throttle_hold) {
             yprt[3] = throttle_target;
         }
-        */
+         */
 
         // if no packet for 5sec maybe lost connection -> then try to land
         clock_gettime(CLOCK_REALTIME, &t2);
@@ -690,7 +693,7 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    //init();
+    init();
     loop();
     close(sock);
     close(ssock);
