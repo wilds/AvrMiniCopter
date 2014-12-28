@@ -218,13 +218,19 @@ const char * handle_packet(char * data) {
         char str[128];
         //take picture
         memset(str, '\0', 128);
-        sprintf(str, "/usr/local/bin/picsnap.sh %05d ", config.cam_seq++);
+        sprintf(str, "/usr/local/bin/picsnap.sh %05d ", config.cam_seq++);      //TODO remove cam_seq and generate name with datetime  VAR=$(date +%x_%H:%M:%S:%N | sed 's/\(:[0-9][0-9]\)[0-9]*$/\1/')
         ret = system(str);
     } else if (strcmp(tokens[0], "vidsnap") == 0) {
-        char str[128];
-        memset(str, '\0', 128);
-        sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
-        ret = system(str);
+        if (strcmp(tokens[1], "record") == 0) {
+            char str[128];
+            memset(str, '\0', 128);
+            sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
+            ret = system(str);
+        } else if (strcmp(tokens[1], "stop") == 0) {
+            // TODO
+        } else if (strcmp(tokens[1], "pause") == 0) {
+            // TODO
+        }
     } else if (strcmp(tokens[0], "querystatus") == 0) {
         char * resp = (char*) malloc(sizeof (char) * 255);
         memset(resp, '\0', 255);
