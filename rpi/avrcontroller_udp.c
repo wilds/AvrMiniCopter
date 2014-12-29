@@ -32,6 +32,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <getopt.h>
+#include <stdarg.h>
 
 #include "config.h"
 #include "avrspi_commands.h"
@@ -163,25 +164,27 @@ char** str_split(char* a_str, const char a_delim) {
 const char * handle_packet(char * data) {
 
     char** tokens = str_split(data, ' ');
-
     if (!tokens)
-        return "KO";
+        return "KO 0";
+
+    char * resp = (char*) malloc(sizeof (char) * 255);
+    memset(resp, '\0', 255);
 
     clock_gettime(CLOCK_REALTIME, &lastPacketTime);
 
     if (strcmp(tokens[0], "hello") == 0) {
 
     } else if (strcmp(tokens[0], "rcinput") == 0) {
-        yprt[0] = atoi(tokens[2]);
-        yprt[1] = atoi(tokens[3]);
-        yprt[2] = atoi(tokens[4]);
-        yprt[3] = atoi(tokens[1]);
+        yprt[0] = atoi(tokens[3]);
+        yprt[1] = atoi(tokens[4]);
+        yprt[2] = atoi(tokens[5]);
+        yprt[3] = atoi(tokens[2]);
 
         dt = TimeSpecDiff(&lastPacketTime, &t3);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
         if (dt_ms < 50) {
             //mssleep(50 - dt_ms);
-            return "FLOOD"; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
+            return ""; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
         }
         t3 = lastPacketTime;
 
@@ -190,12 +193,15 @@ const char * handle_packet(char * data) {
         queueMsg(COMMAND_SET_ROLL, yprt[2]);
         queueMsg(COMMAND_SET_THROTTLE, yprt[3]);
         sendQueue();
+
+        return "";  //controller not wait respose for rcinput command
+
     } else if (strcmp(tokens[0], "heartbeat") == 0) {
 
     } else if (strcmp(tokens[0], "flymode") == 0) {
-        if (strcmp(tokens[1], "stable"))
+        if (strcmp(tokens[2], "stable"))
             sendMsg(COMMAND_SET_FLY_MODE, PARAMETER_SET_FLY_MODE_STABLE);
-        else if (strcmp(tokens[1], "acro"))
+        else if (strcmp(tokens[2], "acro"))
             sendMsg(COMMAND_SET_FLY_MODE, PARAMETER_SET_FLY_MODE_ACRO);
         else
             sendMsg(COMMAND_SET_FLY_MODE, atoi(tokens[1]));
@@ -208,10 +214,10 @@ const char * handle_packet(char * data) {
     } else if (strcmp(tokens[0], "altitudeholder") == 0) {
         sendMsg(COMMAND_SET_ALTITUDE, atoi(tokens[1]));
     } else if (strcmp(tokens[0], "tm") == 0) {
-        sendMsg(COMMAND_TESTMOTOR_FL, atoi(tokens[1]));
-        sendMsg(COMMAND_TESTMOTOR_BL, atoi(tokens[2]));
-        sendMsg(COMMAND_TESTMOTOR_FR, atoi(tokens[3]));
-        sendMsg(COMMAND_TESTMOTOR_BR, atoi(tokens[4]));
+        sendMsg(COMMAND_TESTMOTOR_FL, atoi(tokens[2]));
+        sendMsg(COMMAND_TESTMOTOR_BL, atoi(tokens[3]));
+        sendMsg(COMMAND_TESTMOTOR_FR, atoi(tokens[4]));
+        sendMsg(COMMAND_TESTMOTOR_BR, atoi(tokens[5]));
         sendQueue();
 
     } else if (strcmp(tokens[0], "takepicture") == 0) {
@@ -221,21 +227,19 @@ const char * handle_packet(char * data) {
         sprintf(str, "/usr/local/bin/picsnap.sh %05d ", config.cam_seq++);      //TODO remove cam_seq and generate name with datetime  VAR=$(date +%x_%H:%M:%S:%N | sed 's/\(:[0-9][0-9]\)[0-9]*$/\1/')
         ret = system(str);
     } else if (strcmp(tokens[0], "vidsnap") == 0) {
-        if (strcmp(tokens[1], "record") == 0) {
+        if (strcmp(tokens[2], "record") == 0) {
             char str[128];
             memset(str, '\0', 128);
             sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
             ret = system(str);
-        } else if (strcmp(tokens[1], "stop") == 0) {
+        } else if (strcmp(tokens[2], "stop") == 0) {
             // TODO
-        } else if (strcmp(tokens[1], "pause") == 0) {
+        } else if (strcmp(tokens[2], "pause") == 0) {
             // TODO
         }
     } else if (strcmp(tokens[0], "querystatus") == 0) {
-        char * resp = (char*) malloc(sizeof (char) * 255);
-        memset(resp, '\0', 255);
         // yaw pitch roll altitudetarget altitude
-        snprintf(resp, 255, "status %2.2f %2.2f %2.2f %i %i", avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE]);
+        snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i", tokens[1], avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE]);
         return resp;
     }
 
@@ -257,7 +261,9 @@ const char * handle_packet(char * data) {
             rec_config(js, config.rec_t, config.rec_ypr[rec_setting]);
             break;
      */
-    return "OK";
+    snprintf(resp, 255, "OK %s", tokens[1]);
+
+    return resp;
 }
 
 void recvMsgs() {
@@ -327,12 +333,14 @@ void recvMsgs() {
 
                 const char* resp = handle_packet(data);
 
-                if (verbose >= 2) {
-                    printf("Send response: %s\n", resp);
-                }
+                if (strlen(resp) > 0) {
+                    if (verbose >= 2) {
+                        printf("Send response: %s\n", resp);
+                    }
 
-                if (sendto(ssock, resp, strlen(resp), 0, (sockaddr*) & remoteAddr, (socklen_t) sizeof (remoteAddr)) == -1) {
-                    perror(strerror(errno));
+                    if (sendto(ssock, resp, strlen(resp), 0, (sockaddr*) & remoteAddr, (socklen_t) sizeof (remoteAddr)) == -1) {
+                        perror(strerror(errno));
+                    }
                 }
             }
         }
