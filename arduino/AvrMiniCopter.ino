@@ -219,6 +219,10 @@ void process_command() {
 				   else alt_hold_target += v;
 				   if (alt_hold_target>MAX_ALT) alt_hold_target=MAX_ALT;
 				   break;
+			case 19:
+				   alt_hold_target = v;
+				   if (alt_hold_target>MAX_ALT) alt_hold_target=MAX_ALT;
+				   break;
 #endif
 			case 17: motor_pwm[0] = v; break;
 			case 18: motor_pwm[1] = v; break;
@@ -395,6 +399,14 @@ void log() {
 				log_quat();
 			else if ((loop_count%20)==10)
 				log_motor();
+			break;
+		case 5:
+			if ((loop_count%20)==0) //200Hz -> every 50ms
+				log_gyro();
+#ifdef ALTHOLD
+			else if ((loop_count%20)==10) //200Hz -> every 50ms
+				log_altitude();
+#endif
 			break;
 
 #ifdef ALTHOLD

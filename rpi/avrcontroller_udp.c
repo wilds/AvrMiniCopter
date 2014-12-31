@@ -208,11 +208,12 @@ const char * handle_packet(char * data) {
 
     } else if (strcmp(tokens[0], "altitudeholderenabled") == 0) {
         sendMsg(COMMAND_SET_ALTITUDE_HOLD, atoi(tokens[1])); // 0 or 1
+    } else if (strcmp(tokens[0], "altitudetarget") == 0) {
+        if (tokens[1][0] == '+' || tokens[1][0] == '-')
+            sendMsg(COMMAND_INCREMENT_ALTITUDE_TARGET, atoi(tokens[1]));
+        else
+            sendMsg(COMMAND_SET_ALTITUDE_TARGET, atoi(tokens[1]));
 
-    } else if (strcmp(tokens[0], "altitudeholdermod") == 0) {
-        sendMsg(COMMAND_INCREMENT_ALTITUDE_TARGET, atoi(tokens[1]));
-    } else if (strcmp(tokens[0], "altitudeholder") == 0) {
-        sendMsg(COMMAND_SET_ALTITUDE, atoi(tokens[1]));
     } else if (strcmp(tokens[0], "tm") == 0) {
         sendMsg(COMMAND_TESTMOTOR_FL, atoi(tokens[2]));
         sendMsg(COMMAND_TESTMOTOR_BL, atoi(tokens[3]));
@@ -348,7 +349,7 @@ void recvMsgs() {
 }
 
 void sendConfig() {
-    sendMsg(COMMAND_SET_LOG_MODE, config.log_t);
+    sendMsg(COMMAND_SET_LOG_MODE, PARAMETER_LOG_MODE_GYRO_AND_ALTITUDE);
 
     sendMsg(COMMAND_SET_FLY_MODE, mode);
 
