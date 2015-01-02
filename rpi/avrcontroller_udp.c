@@ -79,6 +79,7 @@ int yprt[4] = {0, 0, 0, 0};
 long dt_ms = 0;
 static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 
+int recording = 0;
 
 #define MSG_SIZE 3
 #define QUEUE_SIZE 20 * MSG_SIZE
@@ -233,14 +234,17 @@ const char * handle_packet(char * data) {
             memset(str, '\0', 128);
             sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
             ret = system(str);
+            recording = 1;
         } else if (strcmp(tokens[2], "stop") == 0) {
             // TODO
+            recording = 0;
         } else if (strcmp(tokens[2], "pause") == 0) {
             // TODO
+            recording = 2;
         }
     } else if (strcmp(tokens[0], "querystatus") == 0) {
         // yaw pitch roll altitudetarget altitude
-        snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i", tokens[1], avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE]);
+        snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i %i", tokens[1], avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE], recording);
         return resp;
     }
 
