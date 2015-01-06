@@ -28,30 +28,23 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdlib.h>
-#include <time.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <getopt.h>
 #include <stdarg.h>
 
-#include "config.h"
 #include "avrspi_commands.h"
-#include "flightlog.h"
-#include "mpu.h"
-
 #include "routines.h"
-#include "msg.h"
 
 #include <string.h>
 #include <assert.h>
+#include <sys/time.h>
 
 int ret;
 int err = 0;
-volatile int stop = 0;
+int stop = 0;
 
 int avr_s[256];
-
-unsigned long flight_time = 0;
 
 int trim[3] = {0, 0, 0}; //in degrees * 1000
 int mode = 0;
@@ -81,41 +74,26 @@ static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 
 int recording = 0;
 
-#define MSG_SIZE 3
-#define QUEUE_SIZE 20 * MSG_SIZE
-unsigned char queue[QUEUE_SIZE];
-unsigned int queue_c = 0; //number of messages
-
-int queueMsg(int t, int v) {
-    if (queue_c >= QUEUE_SIZE - MSG_SIZE) {
-        printf("Error: Queue full. Need to flush!\n");
-        return -1;
-    }
-    queue[MSG_SIZE * queue_c] = t;
-    packi16(queue + MSG_SIZE * queue_c + 1, v);
-
-    queue_c++;
-    return queue_c;
-}
-
-int sendQueue() {
-    if (queue_c <= 0) return 0;
-    if (write(sock, queue, MSG_SIZE * queue_c) < 0) {
-        perror("writing");
-        return -1;
-    }
-    queue_c = 0;
-    return 0;
-}
+int logmode = 0;
+int throttle[2] = {0, 100};
 
 int sendMsg(int t, int v) {
-    static unsigned char buf[3];
-    buf[0] = t;
-    packi16(buf + 1, v);
-    if (write(sock, buf, 3) < 0) {
+    static unsigned char buf[4];
+    static struct local_msg m;
+    m.c = 0;
+    m.t = t;
+    m.v = v;
+    pack_lm(buf, &m);
+    if (write(sock, buf, 4) < 0) {
         perror("writing");
         return -1;
     }
+    /*
+            ret = sendto(sock,buf,LOCAL_MSG_SIZE,0,(struct sockaddr *)&address,sizeof(address));
+            if (ret<=0) {
+                    perror("AVRBARO: writing");
+            }
+     */
     return 0;
 }
 
@@ -189,13 +167,12 @@ const char * handle_packet(char * data) {
         }
         t3 = lastPacketTime;
 
-        queueMsg(COMMAND_SET_YAW, yprt[0]);
-        queueMsg(COMMAND_SET_PITCH, yprt[1]);
-        queueMsg(COMMAND_SET_ROLL, yprt[2]);
-        queueMsg(COMMAND_SET_THROTTLE, yprt[3]);
-        sendQueue();
+        sendMsg(COMMAND_SET_YAW, yprt[0]);
+        sendMsg(COMMAND_SET_PITCH, yprt[1]);
+        sendMsg(COMMAND_SET_ROLL, yprt[2]);
+        sendMsg(COMMAND_SET_THROTTLE, yprt[3]);
 
-        return "";  //controller not wait respose for rcinput command
+        return ""; //controller not wait respose for rcinput command
 
     } else if (strcmp(tokens[0], "heartbeat") == 0) {
 
@@ -220,19 +197,28 @@ const char * handle_packet(char * data) {
         sendMsg(COMMAND_TESTMOTOR_BL, atoi(tokens[3]));
         sendMsg(COMMAND_TESTMOTOR_FR, atoi(tokens[4]));
         sendMsg(COMMAND_TESTMOTOR_BR, atoi(tokens[5]));
-        sendQueue();
 
     } else if (strcmp(tokens[0], "takepicture") == 0) {
-        char str[128];
+        char timeString[128];
+        timeval curTime;
+        gettimeofday(&curTime, NULL);
+        strftime(timeString, 80, "%Y-%m-%d_%H:%M:%S.%f", localtime(&curTime.tv_sec));
+
         //take picture
+        char str[128];
         memset(str, '\0', 128);
-        sprintf(str, "/usr/local/bin/picsnap.sh %05d ", config.cam_seq++);      //TODO remove cam_seq and generate name with datetime  VAR=$(date +%x_%H:%M:%S:%N | sed 's/\(:[0-9][0-9]\)[0-9]*$/\1/')
+        sprintf(str, "/usr/local/bin/picsnap.sh %s ", timeString);
         ret = system(str);
     } else if (strcmp(tokens[0], "vidsnap") == 0) {
         if (strcmp(tokens[2], "record") == 0) {
+            char timeString[128];
+            timeval curTime;
+            gettimeofday(&curTime, NULL);
+            strftime(timeString, 80, "%Y-%m-%d_%H:%M:%S.%f", localtime(&curTime.tv_sec));
+
             char str[128];
             memset(str, '\0', 128);
-            sprintf(str, "/usr/local/bin/vidsnap.sh %05d ", config.cam_seq++);
+            sprintf(str, "/usr/local/bin/vidsnap.sh %s ", timeString);
             ret = system(str);
             recording = 1;
         } else if (strcmp(tokens[2], "stop") == 0) {
@@ -243,22 +229,16 @@ const char * handle_packet(char * data) {
             recording = 2;
         }
     } else if (strcmp(tokens[0], "querystatus") == 0) {
-        // yaw pitch roll altitudetarget altitude
+        // yaw pitch roll altitudetarget altitude recording
         snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i %i", tokens[1], avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE], recording);
         return resp;
     }
 
     /*        case 0:
-            if (js[0].yprt[3] < config.rec_t[2]) {
-                flog_save();
-                config_save();
-                sync();
-                fflush(NULL);
-            }
+            if (js[0].yprt[3]<flight_threshold) sendMsg(0,4);
             break;
         case 3:
             stop = 1;
-            sendMsg(COMMAND_GET, PARAMETER_GET_RESET_AVR); //send reset event before exiting
             break;
         case 12:
             if (rec_setting) rec_setting = 0;
@@ -274,7 +254,7 @@ const char * handle_packet(char * data) {
 void recvMsgs() {
     static int sel = 0, i = 0, ret = 0;
     static unsigned char buf[4];
-    static struct s_msg m;
+    static struct avr_msg m;
 
     static fd_set fds;
     static struct timeval timeout;
@@ -352,44 +332,6 @@ void recvMsgs() {
     } while (!stop && sel && ret > 0); //no error happened; select picked up socket state change; read got some data back
 }
 
-void sendConfig() {
-    sendMsg(COMMAND_SET_LOG_MODE, PARAMETER_LOG_MODE_GYRO_AND_ALTITUDE);
-
-    sendMsg(COMMAND_SET_FLY_MODE, mode);
-
-    int gyro_orientation = inv_orientation_matrix_to_scalar(config.gyro_orient);
-    sendMsg(COMMAND_SET_ORIENTATION, gyro_orientation);
-
-    sendMsg(COMMAND_SET_MPU_ADDRESS, config.mpu_addr);
-
-    sendMsg(COMMAND_SET_MOTOR_PWM_MIN, config.rec_t[0]);
-    sendMsg(COMMAND_SET_MOTOR_PWM_INFLIGHT_THREASHOLD, config.rec_t[2]);
-
-    for (int i = 0; i < 4; i++)
-        sendMsg(COMMAND_SET_MOTOR_PIN_FL + i, config.motor_pin[i]);
-
-    sendMsg(COMMAND_SET_BC, config.baro_f);
-    //PIDS
-    for (int i = 0; i < 3; i++)
-        for (int j = 0; j < 5; j++) {
-            sendMsg(BASE_COMMAND_SET_PID_RATE + i * 10 + j, config.r_pid[i][j]);
-            sendMsg(BASE_COMMAND_SET_PID_STABLE + i * 10 + j, config.s_pid[i][j]);
-        }
-
-    for (int i = 0; i < 5; i++) {
-        sendMsg(BASE_COMMAND_SET_PID_ACCEL + i, config.accel_pid[i]);
-        sendMsg(BASE_COMMAND_SET_PID_ALT + i, config.alt_pid[i]);
-        sendMsg(BASE_COMMAND_SET_PID_VZ + i, config.vz_pid[i]);
-    }
-
-    sendMsg(COMMAND_SET_PID_ACRO_P, config.a_pid[0]);
-
-    int config_done = 1;
-    sendMsg(COMMAND_GET, config_done);
-    mssleep(1000);
-
-}
-
 void reset_avr() {
     //ensure AVR is properly rebooted
     while (avr_s[255] != 1 && !stop) { //once rebooted AVR will report status = 1;
@@ -405,148 +347,7 @@ void catch_signal(int sig) {
     stop = 1;
 }
 
-void log4() {
-    flog_push(5,
-            (float) t2.tv_sec - ts.tv_sec
-            , (float) flight_time
-            , avr_s[18] / 1.f, avr_s[19] / 1.f, avr_s[20] / 1.f
-            );
-}
-
-void log4_print() {
-    printf("T: %li\ttarget_alt: %i\talt: %i\tvz: %i\tp_accel: %i\n",
-            flight_time, avr_s[18], avr_s[19], avr_s[20], avr_s[21]);
-}
-
-void log100_print() {
-    printf("T: %li\tvz: %i\tpos_err: %i\taccel_err: %i\tpid_alt: %i\tpid_vz: %i\tpid_accel: %i\n",
-            flight_time, avr_s[100], avr_s[101], avr_s[102], avr_s[103], avr_s[104], avr_s[105]);
-}
-
-void log3() {
-    flog_push(10,
-            (float) t2.tv_sec - ts.tv_sec
-            , (float) flight_time
-            , avr_s[4] / 100.0f, avr_s[5] / 100.0f, avr_s[6] / 100.0f, avr_s[7] / 100.0f
-            , avr_s[8] / 1.f, avr_s[9] / 1.f, avr_s[10] / 1.f
-            , avr_s[11] / 1.f
-            );
-}
-
-void log3_print() {
-    printf("T: %li\tfl: %i\tbl: %i\tfr: %i\tbr: %i\tqy: %f\tqp: %f\tqr: %f\tyt: %f\ty: %f\n",
-            flight_time, avr_s[8], avr_s[9], avr_s[10], avr_s[11],
-            avr_s[4] / 100.0f, avr_s[5] / 100.0f, avr_s[6] / 100.0f, avr_s[7] / 100.0f, (avr_s[7] - avr_s[4]) / 100.0f
-            );
-    printf("T: %li\tfl: %i\tbl: %i\tfr: %i\tbr: %i\n",
-            flight_time, avr_s[10], avr_s[11], avr_s[12], avr_s[13]);
-}
-
-void log2() { //gyro & quat
-    flog_push(9,
-            (float) t2.tv_sec - ts.tv_sec
-            , (float) flight_time
-            , avr_s[1] / 100.0f, avr_s[2] / 100.0f, avr_s[3] / 100.0f
-            , avr_s[8] / 1.f, avr_s[9] / 1.f, avr_s[10] / 1.f
-            , avr_s[11] / 1.f
-            );
-}
-
-void log2_print() {
-    printf("T: %li\tgy: %2.2f\tgp: %2.2f\tgr: %2.2f\tfl: %i\tbl: %i\tfr: %i\tbr: %i\n",
-            flight_time, avr_s[1] / 100.0f, avr_s[2] / 100.0f, avr_s[3] / 100.0f, avr_s[8], avr_s[9], avr_s[10], avr_s[11]);
-}
-
-void log1() {
-    flog_push(8,
-            (float) t2.tv_sec - ts.tv_sec
-            , (float) flight_time
-            , avr_s[12] / 1000.0f, avr_s[13] / 1000.0f, avr_s[14] / 1000.0f
-            , avr_s[15] / 1000.0f, avr_s[16] / 1000.0f, avr_s[17] / 1000.0f
-            );
-}
-
-void log1_print() {
-    printf("T: %li\tax: %2.3f\t\ay: %2.3f\t\az: %2.3f\tbx: %2.3f\tby: %2.3f\tbz: %2.3f\n",
-            flight_time, avr_s[12] / 1000.0f, avr_s[13] / 1000.0f, avr_s[14] / 1000.0f, avr_s[15] / 1000.0f, avr_s[16] / 1000.0f, avr_s[17] / 1000.0f);
-}
-
-void out_log() {
-    switch (config.log_t) {
-        case 0: break;
-        case 1:
-            log1();
-            if (verbose == 2) log1_print();
-            break;
-        case 2:
-            log2();
-            if (verbose == 2) log2_print();
-            break;
-        case 3:
-            log3();
-            if (verbose == 2) log3_print();
-            break;
-        case 4:
-            log4();
-            if (verbose == 2) log4_print();
-            break;
-        case 100:
-            if (verbose == 2) log100_print();
-            break;
-        default: break;
-    }
-}
-
 unsigned long k = 0;
-
-void init() {
-    //feeds all config and waits for calibration
-    int prev_status = avr_s[255];
-    avr_s[255] = 0;
-
-    reset_avr();
-
-    if (verbose) printf("Initializing RPiCopter...\n");
-    while (avr_s[255] != 5 && !stop) {
-        sendMsg(255, 0); //query status
-        sendMsg(255, 1); //crc status
-        mssleep(350);
-        recvMsgs();
-        if (prev_status != avr_s[255]) {
-            if (verbose) {
-                if (avr_s[255] == -1) printf("Waiting for AVR status change.\n");
-                else printf("AVR Status: %i\n", avr_s[255]);
-            }
-            prev_status = avr_s[255];
-        }
-
-        if (avr_s[254] != 0) { //AVR reported crc error when receiving data
-            printf("AVR reports CRC errors %i\n", avr_s[254]);
-            reset_avr();
-            avr_s[254] = 0;
-            avr_s[255] = 0;
-        } else switch (avr_s[255]) {
-                case -1: break;
-                case 0: reset_avr();
-                    break; //AVR should boot into status 1 so 0 means something wrong
-                case 1: sendConfig();
-                    mssleep(1000);
-                    avr_s[255] = -1;
-                    sendMsg(255, 2);
-                    break;
-                case 2: break; //AVR should arm motors and set status to 3
-                case 3: break; //AVR is initializing MPU
-                case 4: break; //AVR is calibration gyro
-                case 5: break;
-                case 255: printf("Gyro calibration failed!\n");
-                    reset_avr();
-                    avr_s[255] = 0;
-                    break; //calibration failed
-                default: printf("Unknown AVR status %i\n", avr_s[255]);
-                    break;
-            }
-    }
-}
 
 void loop() {
     clock_gettime(CLOCK_REALTIME, &t3);
@@ -555,29 +356,26 @@ void loop() {
 
     while (!err && !stop) {
 
-        if (alt_hold && abs(yprt[3]) > (config.rec_t[1] - 50)) {
+        // Disable altitude holder if throttle go to max value
+        if (alt_hold && ((yprt[3] > throttle[1] - 2) || (yprt[3] < throttle[0] - 2))) {
             alt_hold = 0;
             throttle_hold = 0;
             sendMsg(COMMAND_SET_ALTITUDE_HOLD, alt_hold);
         }
 
-
+        /*
         clock_gettime(CLOCK_REALTIME, &t2);
         dt = TimeSpecDiff(&t2, &t1);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
 
-        /*
+
         if (dt_ms < 50) {
             mssleep(50 - dt_ms);
             continue; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
         }
-        */
+
         t1 = t2;
-
-        if (alt_hold || yprt[3] > config.rec_t[2])
-            flight_time += dt_ms;
-
-        out_log();
+         */
 
         /*
         if (throttle_hold) {
@@ -591,16 +389,17 @@ void loop() {
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
         if (dt_ms > 2500) {
             printf("lost connection\n");
-            queueMsg(COMMAND_SET_YAW, 0);
-            queueMsg(COMMAND_SET_PITCH, 0);
-            queueMsg(COMMAND_SET_ROLL, 0);
-            queueMsg(COMMAND_SET_THROTTLE, config.rec_t[2]);
-            sendQueue();
+            sendMsg(COMMAND_SET_YAW, 0);
+            sendMsg(COMMAND_SET_PITCH, 0);
+            sendMsg(COMMAND_SET_ROLL, 0);
+            sendMsg(COMMAND_SET_THROTTLE, throttle[0]);
             lastPacketTime = t2;
         }
 
         recvMsgs();
     }
+
+    sendMsg(COMMAND_SET_THROTTLE, throttle[0]);
 }
 
 void print_usage() {
@@ -659,24 +458,15 @@ int main(int argc, char **argv) {
         perror("connecting socket");
         exit(1);
     }
-    /*
 
-            //set non-blocking
-               ret = fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
-               if (ret == -1){
-               perror("calling fcntl");
-               return -1;
-               }
+    /* set non-blocking
+       ret = fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
+       if (ret == -1){
+       perror("calling fcntl");
+       return -1;
+       }
      */
     if (verbose) printf("Connected to avrspi\n");
-
-
-
-    ret = config_open("/var/local/rpicopter.config");
-    if (ret < 0) {
-        printf("Failed to initiate config! [%s]\n", strerror(ret));
-        return -1;
-    }
 
     ret = flog_open("/rpicopter");
     if (ret < 0) {
@@ -712,7 +502,9 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    init();
+    // set log mode to gyro+altitude for send info to controller
+    sendMsg(COMMAND_SET_LOG_MODE, PARAMETER_LOG_MODE_GYRO_AND_ALTITUDE);
+
     loop();
     close(sock);
     close(ssock);
