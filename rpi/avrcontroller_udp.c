@@ -75,7 +75,8 @@ static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 int recording = 0;
 
 int logmode = 0;
-int throttle[2] = {0, 100};
+int throttle[2] = {1000, 2000};
+int throttleVal = throttle[0];
 
 int sendMsg(int t, int v) {
     static unsigned char buf[4];
@@ -157,8 +158,9 @@ const char * handle_packet(char * data) {
         yprt[0] = atoi(tokens[3]);
         yprt[1] = atoi(tokens[4]);
         yprt[2] = atoi(tokens[5]);
-        yprt[3] = atoi(tokens[2]);
+        yprt[3] = throttle[0] + atoi(tokens[2]) * (throttle[1]-throttle[0]) / 100;
 
+        /*
         dt = TimeSpecDiff(&lastPacketTime, &t3);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
         if (dt_ms < 50) {
@@ -171,6 +173,7 @@ const char * handle_packet(char * data) {
         sendMsg(COMMAND_SET_PITCH, yprt[1]);
         sendMsg(COMMAND_SET_ROLL, yprt[2]);
         sendMsg(COMMAND_SET_THROTTLE, yprt[3]);
+        */
 
         return ""; //controller not wait respose for rcinput command
 
@@ -230,7 +233,7 @@ const char * handle_packet(char * data) {
         }
     } else if (strcmp(tokens[0], "querystatus") == 0) {
         // yaw pitch roll altitudetarget altitude recording
-        snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i %i", tokens[1], avr_s[LOG_GYRO_YAW] / 100.0f, avr_s[LOG_GYRO_PITCH] / 100.0f, avr_s[LOG_GYRO_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE], recording);
+        snprintf(resp, 255, "status %s %2.2f %2.2f %2.2f %i %i %i", tokens[1], avr_s[LOG_QUATERNION_YAW] / 100.0f, avr_s[LOG_QUATERNION_PITCH] / 100.0f, avr_s[LOG_QUATERNION_ROLL] / 100.0f, avr_s[LOG_ALTITUDE_HOLD_TARGET], avr_s[LOG_ALTITUDE], recording);
         return resp;
     }
 
@@ -312,7 +315,7 @@ void recvMsgs() {
             } else {
                 data[received_bytes] = 0;
 
-                if (verbose >= 2) {
+                if (verbose >= 3) {
                     printf("Received: %s\n", data);
                 }
 
@@ -355,33 +358,25 @@ void loop() {
     if (verbose) printf("Starting main loop...\n");
 
     while (!err && !stop) {
-
         // Disable altitude holder if throttle go to max value
-        if (alt_hold && ((yprt[3] > throttle[1] - 2) || (yprt[3] < throttle[0] - 2))) {
+        if (alt_hold && ((yprt[3] > throttle[1] - 50) || (yprt[3] < throttle[0] - 50))) {
             alt_hold = 0;
             throttle_hold = 0;
             sendMsg(COMMAND_SET_ALTITUDE_HOLD, alt_hold);
         }
 
-        /*
         clock_gettime(CLOCK_REALTIME, &t2);
         dt = TimeSpecDiff(&t2, &t1);
         dt_ms = dt->tv_sec * 1000 + dt->tv_nsec / 1000000;
-
-
         if (dt_ms < 50) {
             mssleep(50 - dt_ms);
             continue; //do not flood AVR with data - will cause only problems; each loop sends 4 msg; 50ms should be enough for AVR to consume them
         }
-
         t1 = t2;
-         */
 
-        /*
         if (throttle_hold) {
             yprt[3] = throttle_target;
         }
-         */
 
         // if no packet for 5sec maybe lost connection -> then try to land
         clock_gettime(CLOCK_REALTIME, &t2);
@@ -394,6 +389,11 @@ void loop() {
             sendMsg(COMMAND_SET_ROLL, 0);
             sendMsg(COMMAND_SET_THROTTLE, throttle[0]);
             lastPacketTime = t2;
+        } else {
+            sendMsg(COMMAND_SET_YAW, yprt[0]);
+            sendMsg(COMMAND_SET_PITCH, yprt[1]);
+            sendMsg(COMMAND_SET_ROLL, yprt[2]);
+            sendMsg(COMMAND_SET_THROTTLE, yprt[3]);
         }
 
         recvMsgs();
@@ -467,12 +467,6 @@ int main(int argc, char **argv) {
        }
      */
     if (verbose) printf("Connected to avrspi\n");
-
-    ret = flog_open("/rpicopter");
-    if (ret < 0) {
-        printf("Failed to initiate log! [%s]\n", strerror(err));
-        return -1;
-    }
 
     /* Create socket to listen */
     ssock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);

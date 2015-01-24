@@ -402,7 +402,7 @@ void log() {
 			break;
 		case 5:
 			if ((loop_count%20)==0) //200Hz -> every 50ms
-				log_gyro();
+				log_quat();
 #ifdef ALTHOLD
 			else if ((loop_count%20)==10) //200Hz -> every 50ms
 				log_altitude();
