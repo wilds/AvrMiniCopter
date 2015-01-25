@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Wilds
+ * Copyright (C) 2014-2015 Wilds
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -35,10 +35,20 @@
 
 #include "avrspi_commands.h"
 #include "routines.h"
+#include "ps3config.h"
 
 #include <string.h>
 #include <assert.h>
 #include <sys/time.h>
+
+#define CFG_PATH "/etc/avrminicopter/"
+
+struct ps3_config config;
+#define MIN 0
+#define MAX 1
+#define YAW 0
+#define PITCH 1
+#define ROLL 2
 
 int ret;
 int err = 0;
@@ -75,8 +85,6 @@ static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 int recording = 0;
 
 int logmode = 0;
-int throttle[2] = {1000, 2000};
-int throttleVal = throttle[0];
 
 int sendMsg(int t, int v) {
     static unsigned char buf[4];
@@ -155,10 +163,10 @@ const char * handle_packet(char * data) {
     if (strcmp(tokens[0], "hello") == 0) {
 
     } else if (strcmp(tokens[0], "rcinput") == 0) {
-        yprt[0] = atoi(tokens[3]);
-        yprt[1] = atoi(tokens[4]);
-        yprt[2] = atoi(tokens[5]);
-        yprt[3] = throttle[0] + atoi(tokens[2]) * (throttle[1]-throttle[0]) / 100;
+        yprt[0] = config.rec_ypr[MAX][YAW] * atoi(tokens[3]) / 100;
+        yprt[1] = config.rec_ypr[MAX][PITCH] * atoi(tokens[4]) / 100;
+        yprt[2] = config.rec_ypr[MAX][ROLL] * atoi(tokens[5]) / 100;
+        yprt[3] = config.throttle[MIN] + atoi(tokens[2]) * (config.throttle[MAX] - config.throttle[MIN]) / 100;
 
         /*
         dt = TimeSpecDiff(&lastPacketTime, &t3);
@@ -359,7 +367,7 @@ void loop() {
 
     while (!err && !stop) {
         // Disable altitude holder if throttle go to max value
-        if (alt_hold && ((yprt[3] > throttle[1] - 50) || (yprt[3] < throttle[0] - 50))) {
+        if (alt_hold && ((yprt[3] > config.throttle[MAX] - 50) || (yprt[3] < config.throttle[MIN] - 50))) {
             alt_hold = 0;
             throttle_hold = 0;
             sendMsg(COMMAND_SET_ALTITUDE_HOLD, alt_hold);
@@ -387,7 +395,7 @@ void loop() {
             sendMsg(COMMAND_SET_YAW, 0);
             sendMsg(COMMAND_SET_PITCH, 0);
             sendMsg(COMMAND_SET_ROLL, 0);
-            sendMsg(COMMAND_SET_THROTTLE, throttle[0]);
+            sendMsg(COMMAND_SET_THROTTLE, config.throttle[MIN]);
             lastPacketTime = t2;
         } else {
             sendMsg(COMMAND_SET_YAW, yprt[0]);
@@ -399,7 +407,7 @@ void loop() {
         recvMsgs();
     }
 
-    sendMsg(COMMAND_SET_THROTTLE, throttle[0]);
+    sendMsg(COMMAND_SET_THROTTLE, config.throttle[MIN]);
 }
 
 void print_usage() {
@@ -498,6 +506,13 @@ int main(int argc, char **argv) {
 
     // set log mode to gyro+altitude for send info to controller
     sendMsg(COMMAND_SET_LOG_MODE, PARAMETER_LOG_MODE_GYRO_AND_ALTITUDE);
+
+    ret = ps3config_open(&config, CFG_PATH);
+    if (ret < 0) {
+            printf("Failed to initiate config! [%s]\n", strerror(ret));
+            return -1;
+    }
+    //flight_threshold = config.throttle[MIN]+50;
 
     loop();
     close(sock);
