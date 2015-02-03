@@ -189,8 +189,7 @@ void process_command() {
 				yaw_target = mympu.ypr[0];    //when changing fly_mode during flight reset the yaw_target                                           
 				break;
 			case 4: 
-				if (v==1) mympu_inverted = true;
-				else mympu_inverted = false;
+				gyro_orientation = v;
 				break;
 
 			case 5: case 6: case 7: case 8: 

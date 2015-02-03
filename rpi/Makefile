@@ -13,7 +13,7 @@ INSTALL=install
 
 OBJ_PS3CONTROLLER=ps3controller.o routines.o ps3config.o ps3dev.o
 OBJ_AVRCONTROLLER_UDP=avrcontroller_udp.o routines.o ps3config.o
-OBJ_AVRSPI=avrspi.o routines.o gpio.o spidev.o avrconfig.o flightlog.o
+OBJ_AVRSPI=avrspi.o routines.o gpio.o spidev.o avrconfig.o mpu.o flightlog.o
 OBJ_AVRSPI_CMD=avrspi_cmd.o routines.o
 OBJ_AVRBARO=avrbaro.o routines.o bmpsensor/libbs.a libs/libi2cdev.a
 

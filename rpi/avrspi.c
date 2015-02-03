@@ -19,6 +19,7 @@
 
 #include "avrconfig.h"
 #include "flightlog.h"
+#include "mpu.h"
 
 #define MAX_TCP_CLIENTS 6
 #define MAX_UDP_CLIENTS 6
@@ -228,7 +229,8 @@ void sendConfig() {
         spi_sendIntPacket(3,0); //initial mode
         spi_sendIntPacket(2 ,log_mode); //log mode
 
-        spi_sendIntPacket(4,config.mpu_inverted);
+        int gyro_orientation = inv_orientation_matrix_to_scalar(config.gyro_orient);
+        spi_sendIntPacket(4,gyro_orientation);
 
         spi_sendIntPacket(9,config.mpu_addr);
 

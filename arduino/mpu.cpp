@@ -13,7 +13,6 @@
 #define PI_2            1.57079632679489661923f //PI/2
 
 struct s_mympu mympu;
-bool mympu_inverted = false;
 
 struct s_quat { float w, x, y, z; }; 
 
@@ -239,20 +238,8 @@ int8_t mympu_update() {
 	mympu.accel[2] = (float)a.z/ACCEL_SENS;
 	//mympu.accel[2] = (float)a.z/ACCEL_SENS - mympu.gravity;
 
-
 	mympu.accel[1] *= -1.f;
 
-	if (mympu_inverted) {
-		mympu.ypr[1] *= -1.f; 
-		mympu.ypr[2] *= -1.f; 
-
-		mympu.gyro[1] *= -1.f; 
-		mympu.gyro[2] *= -1.f; 
-
-		mympu.accel[0] *= -1.f;
-		mympu.accel[1] *= -1.f;
-	} 
-		
 	_c++;
 
 	return 0;
