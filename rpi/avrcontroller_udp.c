@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <stdlib.h>
 #include <sched.h>
@@ -85,6 +86,8 @@ static struct timespec ts, t1, t2, t3, *dt, lastPacketTime;
 int recording = 0;
 
 int logmode = 0;
+
+#define CAM_CMD "/usr/local/bin/camera_streamer.sh"
 
 int sendMsg(int t, int v) {
     static unsigned char buf[4];
@@ -149,7 +152,7 @@ char** str_split(char* a_str, const char a_delim) {
     return result;
 }
 
-const char * handle_packet(char * data) {
+const char * handle_packet(char * data, sockaddr_in remoteAddr) {
 
     char** tokens = str_split(data, ' ');
     if (!tokens)
@@ -162,6 +165,24 @@ const char * handle_packet(char * data) {
 
     if (strcmp(tokens[0], "hello") == 0) {
 
+    } else if (strcmp(tokens[0], "stream") == 0) {
+        // TODO handle resolution tokens[4] x tokens[5]
+
+        char *ip = inet_ntoa(remoteAddr.sin_addr);
+
+        char cmd[256];
+        memset(cmd, '\0', 256);
+        sprintf(cmd, "%s %s %s %s", CAM_CMD, tokens[2], ip, tokens[3]);
+        if (verbose) printf("Executing: %s\n", cmd);
+        ret = system(cmd);
+
+        if (ret != 0) {
+            snprintf(resp, 255, "KO %s %s", tokens[1], tokens[2]);
+            return resp;
+        } else {
+            snprintf(resp, 255, "OK %s %s", tokens[1], tokens[2]);
+            return resp;
+        }
     } else if (strcmp(tokens[0], "rcinput") == 0) {
         yprt[0] = config.rec_ypr[MAX][YAW] * atoi(tokens[3]) / 100;
         yprt[1] = config.rec_ypr[MAX][PITCH] * atoi(tokens[4]) / 100;
@@ -327,7 +348,7 @@ void recvMsgs() {
                     printf("Received: %s\n", data);
                 }
 
-                const char* resp = handle_packet(data);
+                const char* resp = handle_packet(data, remoteAddr);
 
                 if (strlen(resp) > 0) {
                     if (verbose >= 2) {
